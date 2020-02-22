@@ -4,8 +4,8 @@ from dbt.adapters.base import Credentials
 from dbt.adapters.sql import SQLConnectionManager
 from dbt.adapters.spark.connection_methods import ConnectionMethod
 from dbt.adapters.spark.spark_shell_types import SparkShellType
-from dbt.adapters.spark.connection_wrappers.thrift_connection_wrapper import ThriftConnectionWrapper
-from dbt.adapters.spark.connection_wrappers.shell_connection_wrapper import ShellConnectionWrapper
+from dbt.adapters.spark.thrift_connection_wrapper import ThriftConnectionWrapper
+from dbt.adapters.spark.shell_connection import ShellConnection
 from dbt.logger import GLOBAL_LOGGER as logger
 from dbt.compat import NUMBERS
 import dbt.exceptions
@@ -171,7 +171,7 @@ class SparkConnectionManager(SQLConnectionManager):
     @classmethod
     def _open_spark_shell(cls, creds):
         cls.validate_creds(creds, ['spark-shell-type'])
-        return None  # TODO: create a connection
+        return ShellConnection(creds)
 
 
     @classmethod
@@ -215,7 +215,7 @@ class SparkConnectionManager(SQLConnectionManager):
         if creds.method in [ConnectionMethod.HTTP, ConnectionMethod.THRIFT]:
             wrapped = ThriftConnectionWrapper(conn)
         elif creds.method == ConnectionMethod.SPARK_SHELL:
-            wrapped = ShellConnectionWrapper(conn)
+            wrapped = conn  # no need to wrap this conn
 
         connection.state = 'open'
         connection.handle = wrapped

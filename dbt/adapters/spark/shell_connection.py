@@ -1,6 +1,6 @@
 import dbt.exceptions
 
-class ShellConnectionWrapper():
+class ShellConnection():
 
     def __init__(self):
         self.a = None
