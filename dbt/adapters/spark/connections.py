@@ -67,8 +67,16 @@ SPARK_CREDENTIALS_CONTRACT = {
             'minimum': 0,
             'maximum': 60,
         },
-        'spark-shell-type': {
-            'enum': SparkShellType.all_types(),
+        'spark_shell': {
+            'type': 'object',
+            'properties': {
+                'shell_type': {
+                    'enum': SparkShellType.all_types(),
+                },
+                'cmd': {
+                    'type': 'string'
+                }
+            }
         }
     },
     'required': ['method', 'host', 'database', 'schema'],
@@ -132,9 +140,9 @@ class SparkConnectionManager(SQLConnectionManager):
         logger.debug("NotImplemented: rollback")
 
     @classmethod
-    def validate_creds(cls, creds, required):
-        method = creds.method
-
+    def validate_creds(cls, creds, required, method=None):
+        if method is None:
+            method = creds.method
         for key in required:
             if key not in creds:
                 raise dbt.exceptions.DbtProfileError(
@@ -170,7 +178,8 @@ class SparkConnectionManager(SQLConnectionManager):
 
     @classmethod
     def _open_spark_shell(cls, creds):
-        cls.validate_creds(creds, ['spark-shell-type'])
+        cls.validate_creds(creds, ['spark_shell'])
+        cls.validate_creds(creds['spark_shell'], ['shell_type', 'cmd'], method=creds.method)
         return ShellConnection(creds)
 
 
@@ -182,7 +191,6 @@ class SparkConnectionManager(SQLConnectionManager):
         creds = connection.credentials
         connect_retries = creds.get('connect_retries', 0)
         connect_timeout = creds.get('connect_timeout', 10)
-
         exc = None
         for i in range(1 + connect_retries):
             try:
@@ -219,6 +227,7 @@ class SparkConnectionManager(SQLConnectionManager):
 
         connection.state = 'open'
         connection.handle = wrapped
+        connection.method = creds.method
         return connection
 
     @classmethod
@@ -227,3 +236,12 @@ class SparkConnectionManager(SQLConnectionManager):
 
     def cancel(self, connection):
         connection.handle.cancel()
+
+    def execute(
+        self, sql: str, auto_begin: bool = False, fetch: bool = False
+    ):
+        connection = self.get_thread_connection()
+        if connection.method in [ConnectionMethod.HTTP, ConnectionMethod.THRIFT]:
+            return self.execute(sql, auto_begin, fetch)
+        elif connection.method == ConnectionMethod.SPARK_SHELL:
+            return connection.handle.execute(sql, auto_begin, fetch)
