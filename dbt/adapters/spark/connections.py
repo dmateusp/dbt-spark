@@ -2,6 +2,8 @@ from contextlib import contextmanager
 
 from dbt.adapters.base import Credentials
 from dbt.adapters.sql import SQLConnectionManager
+from dbt.adapters.spark.connection_methods import ConnectionMethod
+from dbt.adapters.spark.spark_shell_types import SparkShellType
 from dbt.logger import GLOBAL_LOGGER as logger
 from dbt.compat import NUMBERS
 import dbt.exceptions
@@ -25,7 +27,7 @@ SPARK_CREDENTIALS_CONTRACT = {
     'additionalProperties': False,
     'properties': {
         'method': {
-            'enum': ['thrift', 'http'],
+            'enum': ConnectionMethod.all_methods(),
         },
         'host': {
             'type': 'string'
@@ -62,6 +64,9 @@ SPARK_CREDENTIALS_CONTRACT = {
             'type': 'integer',
             'minimum': 0,
             'maximum': 60,
+        },
+        'spark-shell-type': {
+            'enum': SparkShellType.all_types(),
         }
     },
     'required': ['method', 'host', 'database', 'schema'],
@@ -247,12 +252,44 @@ class SparkConnectionManager(SQLConnectionManager):
                     "The config '{}' is required when using the {} method"
                     " to connect to Spark".format(key, method))
 
+
+    @classmethod
+    def _open_http(cls, creds):
+        cls.validate_creds(creds, ['token', 'host', 'port',
+                                'cluster', 'organization'])
+
+        conn_url = SPARK_CONNECTION_URL.format(**creds)
+        transport = THttpClient.THttpClient(conn_url)
+
+        raw_token = "token:{}".format(creds.token).encode()
+        token = base64.standard_b64encode(raw_token).decode()
+        transport.setCustomHeaders({
+            'Authorization': 'Basic {}'.format(token)
+        })
+
+        return hive.connect(thrift_transport=transport)
+
+
+    @classmethod
+    def _open_thrift(cls, creds):
+        cls.validate_creds(creds, ['host'])
+
+        return hive.connect(host=creds.host,
+                            port=creds.get('port'),
+                            username=creds.get('user'))
+
+
+    @classmethod
+    def _open_spark_shell(cls, creds):
+        cls.validate_creds(creds, ['spark-shell-type'])
+        return None  # TODO: create a connection
+
+
     @classmethod
     def open(cls, connection):
         if connection.state == 'open':
             logger.debug('Connection is already open, skipping open.')
             return connection
-
         creds = connection.credentials
         connect_retries = creds.get('connect_retries', 0)
         connect_timeout = creds.get('connect_timeout', 10)
@@ -260,27 +297,12 @@ class SparkConnectionManager(SQLConnectionManager):
         exc = None
         for i in range(1 + connect_retries):
             try:
-                if creds.method == 'http':
-
-                    cls.validate_creds(creds, ['token', 'host', 'port',
-                                               'cluster', 'organization'])
-
-                    conn_url = SPARK_CONNECTION_URL.format(**creds)
-                    transport = THttpClient.THttpClient(conn_url)
-
-                    raw_token = "token:{}".format(creds.token).encode()
-                    token = base64.standard_b64encode(raw_token).decode()
-                    transport.setCustomHeaders({
-                        'Authorization': 'Basic {}'.format(token)
-                    })
-
-                    conn = hive.connect(thrift_transport=transport)
-                elif creds.method == 'thrift':
-                    cls.validate_creds(creds, ['host'])
-
-                    conn = hive.connect(host=creds.host,
-                                        port=creds.get('port'),
-                                        username=creds.get('user'))
+                if creds.method == ConnectionMethod.HTTP:
+                    conn = cls._open_http(creds)
+                elif creds.method == ConnectionMethod.THRIFT:
+                    conn = cls._open_thrift(creds)
+                elif creds.method == ConnectionMethod.SPARK_SHELL:
+                    conn = cls._open_spark_shell(creds)
                 break
             except Exception as e:
                 exc = e
