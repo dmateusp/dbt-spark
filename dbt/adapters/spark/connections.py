@@ -244,4 +244,4 @@ class SparkConnectionManager(SQLConnectionManager):
         if connection.method in [ConnectionMethod.HTTP, ConnectionMethod.THRIFT]:
             return self.execute(sql, auto_begin, fetch)
         elif connection.method == ConnectionMethod.SPARK_SHELL:
-            return connection.handle.execute(sql, auto_begin, fetch)
+            return connection.handle.execute(sql, fetch)
