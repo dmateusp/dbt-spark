@@ -4,6 +4,7 @@ from dbt.logger import GLOBAL_LOGGER as logger
 import pexpect
 from dbt.exceptions import DatabaseException
 import re
+import time
 
 class ShellConnection():
     def __init__(self, creds):
@@ -14,6 +15,14 @@ class ShellConnection():
         logger.debug('Starting Spark shell with: ' + self.shell_cmd)
         self.session.expect('scala>')
         self._log_shell_output(self.session.before.decode('utf-8'))
+        self._create_spark_session()
+
+    def _create_spark_session(self):
+        self.session.sendline('val spark = org.apache.spark.sql.SparkSession.builder().appName("dbt").enableHiveSupport().getOrCreate()')
+        self.session.expect('scala>')
+        last_output = self.session.before.decode('utf-8')
+        self._log_shell_output(last_output)
+        self._check_if_exception(last_output)
 
     def _log_shell_output(self, last_output):
         logger.debug(
